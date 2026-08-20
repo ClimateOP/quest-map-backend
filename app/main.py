@@ -5,6 +5,8 @@ import pymupdf as fitz  # PyMuPDF
 from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
+from app.segmentation import segment_questions
+
 app = FastAPI(title="Question Paper Analyzer")
 
 app.add_middleware(
@@ -51,6 +53,7 @@ async def upload_file(file: UploadFile = File(...)):
         pages = extract_text_by_page(save_path)
         result["pages"] = pages
         result["needs_ocr"] = any(p["is_scanned"] for p in pages)
+        result["questions"] = segment_questions(pages, source_paper=file.filename)
     else:
         result["pages"] = None
         result["note"] = "Non-PDF upload — OCR/image handling comes in a later step."
