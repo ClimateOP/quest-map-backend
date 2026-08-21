@@ -2,3 +2,13 @@ fastapi
 uvicorn[standard]
 python-multipart
 pymupdf
+pytesseract
+pillow
+
+# Optional but recommended: PaddleOCR for GPU-accelerated, higher-accuracy
+# OCR on scanned/photographed papers. Falls back to Tesseract automatically
+# if not installed. For GPU support (recommended on an RTX 3060), install
+# paddlepaddle-gpu instead of paddlepaddle -- see:
+# https://www.paddlepaddle.org.cn/en/install/quick
+paddlepaddle
+paddleocr
