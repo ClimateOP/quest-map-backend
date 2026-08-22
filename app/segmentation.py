@@ -23,7 +23,7 @@ QNUM_ALT_RE = re.compile(r"^\s*Q\.?\s*([0-9lIiOo]{1,2})\.?\s*", re.IGNORECASE)
 
 # Matches subparts: "a)", "(a)", "i)", "(i)" — anchored to line start OR
 # right after a Q-number marker on the same line (e.g. "Q.1 a) Discuss...")
-SUBPART_RE = re.compile(r"\(?([a-h]|[ivx]{1,4})\)\s+", re.IGNORECASE)
+SUBPART_RE = re.compile(r"\(?([a-h]|[ivx]{1,4})\)\s*", re.IGNORECASE)
 
 # Lines that start an instructions block — question-like numbering here
 # ("1. Answer five questions...") should NOT be treated as real questions.
@@ -172,5 +172,30 @@ def segment_questions(pages: list, source_paper: str = None):
             q["review_reason"] = q.get(
                 "review_reason", "possible missing question in sequence"
             )
+
+    # Per-question check: the same subpart letter appearing twice under one
+    # question number (e.g. two "a)" under Q3) almost always means a Q-marker
+    # was missed during OCR and a later question's content got folded into
+    # an earlier one, rather than that the paper genuinely repeats a letter.
+    from collections import Counter
+
+    by_qnum = {}
+    for q in questions:
+        by_qnum.setdefault(q["question_number"], []).append(q)
+    for qnum, group in by_qnum.items():
+        subparts = [q["subpart"] for q in group if q["subpart"]]
+        dupes = {s for s, count in Counter(subparts).items() if count > 1}
+        if dupes:
+            for q in group:
+                q["needs_review"] = True
+                q["review_reason"] = (
+                    f"duplicate subpart '{q['subpart']}' under Q{qnum} — "
+                    "a question boundary may have been missed"
+                    if q["subpart"] in dupes
+                    else q.get(
+                        "review_reason",
+                        f"sits under Q{qnum}, which has a duplicated subpart — may be misattributed",
+                    )
+                )
 
     return questions

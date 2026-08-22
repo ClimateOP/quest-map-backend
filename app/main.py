@@ -42,7 +42,9 @@ def text_quality_score(text: str) -> float:
     return len(clean_words) / len(words)
 
 
-MARGIN_QNUM_RE = re.compile(r"^Q?\.?\s*([0-9lIiOoSsZzBbGg]{1,2})$", re.IGNORECASE)
+MARGIN_QNUM_RE = re.compile(
+    r"^Q\.?\s*([0-9lIiOoSsZzBbGg]{1,2})(?:\s+(\d{1,2}))?$", re.IGNORECASE
+)
 QMARKER_COUNT_RE = re.compile(r"Q\.?\s*\d{1,2}", re.IGNORECASE)
 
 # Common OCR misreads of digits, applied only to short Q-number tokens
@@ -76,21 +78,51 @@ def _reconstruct_lines(lines, page_width, expected_q=1):
     margin_labels = []
     body_lines = []
     for line in lines:
-        is_margin_position = line["x0"] < page_width * 0.15
         m = MARGIN_QNUM_RE.match(line["text"])
-        if is_margin_position and m:
+        if m:
+            # This regex requires the ENTIRE line to be just a Q-number,
+            # optionally followed by a lone marks number — a pattern that
+            # can never occur in normal body text, so no position gate is
+            # needed here; relying on x0-vs-page-width was fragile (phone
+            # photos have unpredictable margins/cropping) and was silently
+            # rejecting real labels that don't happen to sit far enough left.
             num = m.group(1).translate(_OCR_NUM_FIX)
             if num.isdigit():
-                margin_labels.append({"num": num, "y0": line["y0"]})
+                margin_labels.append(
+                    {"num": num, "marks": m.group(2), "y0": line["y0"]}
+                )
                 continue
         body_lines.append(line)
 
+    # Reattach each margin label to the nearest attachable body line by
+    # absolute vertical distance. These labels (and any marks printed
+    # alongside them, e.g. "Q.1  10") sit at unpredictable positions
+    # relative to the paragraph they label — sometimes between its wrapped
+    # lines, sometimes just above its first line — so no fixed directional
+    # preference (always-preceding, always-following) holds across real
+    # scans; plain nearest-distance is more robust once bare marks-only
+    # lines are excluded from the candidate pool (see below).
+    #
+    # A bare-number-only line (e.g. a stray marks value like "10" sitting
+    # on its own row) must never be treated as a valid attachment target:
+    # a Q-label and its subpart's marks number often sit at nearly the
+    # same height (both floating in the gap between wrapped text lines),
+    # which can make the marks number the "closest" candidate even though
+    # it's obviously not the start of the question.
+    BARE_NUMBER_RE = re.compile(r"^\d{1,3}$")
+
+    def _is_attachable(l):
+        return not BARE_NUMBER_RE.match(l["text"])
+
     for label in margin_labels:
-        if not body_lines:
+        candidates = [l for l in body_lines if _is_attachable(l)]
+        if not candidates:
             continue
-        closest = min(body_lines, key=lambda l: abs(l["y0"] - label["y0"]))
-        if abs(closest["y0"] - label["y0"]) < 60:  # px tolerance at 300dpi
+        closest = min(candidates, key=lambda l: abs(l["y0"] - label["y0"]))
+        if abs(closest["y0"] - label["y0"]) < 150:  # px tolerance at 300dpi
             closest["text"] = f"Q.{label['num']} {closest['text']}"
+            if label["marks"]:
+                closest["text"] += f" {label['marks']}"
 
     body_lines.sort(key=lambda l: l["y0"])
 
